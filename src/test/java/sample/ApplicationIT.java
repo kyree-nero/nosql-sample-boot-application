@@ -3,8 +3,6 @@ package sample;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.stream.StreamSupport;
 
 import org.hamcrest.Matchers;
 import org.junit.Assert;
@@ -14,15 +12,18 @@ import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit4.SpringRunner;
+import org.springframework.test.web.client.MockMvcClientHttpRequestFactory;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.result.MockMvcResultHandlers;
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
+import org.springframework.web.client.RestTemplate;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -38,13 +39,20 @@ import sample.repository.PersonRepository;
 @TestPropertySource("/application-test.properties")
 @AutoConfigureMockMvc
 public class ApplicationIT {
+	
 	@Autowired PersonRepository personRepository;
 	@Autowired ForceSensitiveOrderRepository forceSensitiveOrderRepository;
 	
 	@Autowired MockMvc mockMvc;
 	
+	
+	
 	@Before public void before() {
 		
+		MockMvcClientHttpRequestFactory requestFactory = new MockMvcClientHttpRequestFactory(mockMvc);
+        RestTemplate restTemplate = new RestTemplate(requestFactory);
+
+        
 		personRepository.deleteAll();
 		forceSensitiveOrderRepository.deleteAll();
 		
@@ -166,6 +174,107 @@ public class ApplicationIT {
 		.andExpect(MockMvcResultMatchers.jsonPath("$", Matchers.notNullValue()))
 		.andExpect(MockMvcResultMatchers.jsonPath("$._embedded", Matchers.notNullValue()))
 		.andExpect(MockMvcResultMatchers.jsonPath("$._embedded.person", Matchers.hasSize(2)));
+		
+	}
+	
+
+	@Test public void addPerson() throws Exception{ 
+		//add entity
+		long existingCount = personRepository.count();
+		
+		Person testPerson = new Person();
+		testPerson.setName("test person");
+		
+		
+		ObjectMapper mapper = new ObjectMapper();
+		String jsonInString = mapper.writeValueAsString(testPerson);
+		
+		MvcResult result = mockMvc.perform(
+				MockMvcRequestBuilders.post("/person", new Object[] {})
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(jsonInString)
+				.accept(MediaType.APPLICATION_JSON))
+				.andDo(MockMvcResultHandlers.print())
+		.andExpect(MockMvcResultMatchers.status().isCreated())
+		.andReturn();
+		System.out.println("-----");
+		
+		
+		JsonNode node = new ObjectMapper().readTree(result.getResponse().getContentAsString());
+		node = node.findValue("href");
+		String value = node.textValue();
+		String personUrl = value;
+		while(value.indexOf("/") != -1) {
+			value = value.substring((value.indexOf("/") + 1) , value.length());
+		}
+		Assert.assertNotNull(value);
+		
+		Assert.assertNotEquals(existingCount, personRepository.count());
+		String personId = value;
+				
+		//find an existing order
+		result = mockMvc.perform(
+				MockMvcRequestBuilders.get("/orders", new Object[] {})
+				.accept(MediaType.APPLICATION_JSON)
+				.contentType(MediaType.APPLICATION_JSON)
+				
+		)
+				.andDo(MockMvcResultHandlers.print())
+		.andExpect(MockMvcResultMatchers.status().isOk())
+		.andReturn();
+		
+		node = new ObjectMapper().readTree(result.getResponse().getContentAsString());
+		node = node.findValue("href");
+		value = node.textValue();
+		String orderUrl = value;
+		while(value.indexOf("/") != -1) {
+			value = value.substring((value.indexOf("/") + 1) , value.length());
+		}
+		String orderId = value;
+		
+		//add relationship to order
+		result = mockMvc.perform(
+				MockMvcRequestBuilders.put("/person/"+personId+"/partOf", new Object[] {})
+				.contentType("text/uri-list")
+				.content(orderUrl)
+				.accept(MediaType.APPLICATION_JSON))
+				.andDo(MockMvcResultHandlers.print())
+		.andExpect(MockMvcResultMatchers.status().isNoContent())
+		.andReturn();
+		
+		//add relationship to person
+		result = mockMvc.perform(
+				MockMvcRequestBuilders.put("/orders/"+orderId+"/members", new Object[] {})
+				.contentType("text/uri-list")
+				.content(personUrl)
+				.accept(MediaType.APPLICATION_JSON))
+				.andDo(MockMvcResultHandlers.print())
+		.andExpect(MockMvcResultMatchers.status().isNoContent())
+		.andReturn();
+		
+		
+		//assert relationships were added
+		result = mockMvc.perform(
+				MockMvcRequestBuilders.get("/person/"+personId+"/partOf", new Object[] {})
+				.accept(MediaType.APPLICATION_JSON)
+				.contentType(MediaType.APPLICATION_JSON))
+				.andDo(MockMvcResultHandlers.print())
+		.andExpect(MockMvcResultMatchers.status().isOk())
+		.andExpect(MockMvcResultMatchers.jsonPath("$._embedded", Matchers.anything()))
+		.andExpect(MockMvcResultMatchers.jsonPath("$._embedded.orders[*]", Matchers.anything()))
+		.andExpect(MockMvcResultMatchers.jsonPath("$._embedded.orders[*].name", Matchers.anything()))
+		.andReturn();
+	
+		result = mockMvc.perform(
+				MockMvcRequestBuilders.get("/orders/"+orderId+"/members", new Object[] {})
+				.accept(MediaType.APPLICATION_JSON)
+				.contentType(MediaType.APPLICATION_JSON))
+				.andDo(MockMvcResultHandlers.print())
+		.andExpect(MockMvcResultMatchers.status().isOk())
+		.andExpect(MockMvcResultMatchers.jsonPath("$._embedded", Matchers.anything()))
+		.andExpect(MockMvcResultMatchers.jsonPath("$._embedded.person[*]", Matchers.anything()))
+		.andExpect(MockMvcResultMatchers.jsonPath("$._embedded.person[*].name", Matchers.anything()))
+		.andReturn();
 		
 	}
 	

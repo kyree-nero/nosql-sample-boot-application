@@ -1,0 +1,12 @@
+This is a nosql sample application.
+
+The following technologies are used.
+
+-Spring (REST)
+-Transactions 
+-Spring Data (NOSQL)
+-nosql
+-Spring Integration Tests (Junit)
+
+The project runs on a local neo4j with tomcat.  The integration tests show simple manipulation of the neo4j graph via 
+@RepositoryRestResource along with creation of nodes and relationships.
